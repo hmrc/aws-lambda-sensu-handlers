@@ -1,0 +1,13 @@
+-r requirements.txt
+pytest==5.0.0
+pytest-cov==2.7.1
+pytest-pycodestyle==1.4.0
+pytest-black==0.3.7
+black==19.3b0
+reorder-python-imports==1.5.0
+pycodestyle==2.5.0
+flake8==3.7.7
+mypy==0.720
+bandit==1.6.2
+safety==1.8.5
+testfixtures==6.10.3

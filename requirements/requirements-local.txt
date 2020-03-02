@@ -1,0 +1,3 @@
+-r requirements-test.txt
+pre-commit==1.17.0
+aws-profile==0.5.0
