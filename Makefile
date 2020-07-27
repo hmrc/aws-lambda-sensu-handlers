@@ -1,6 +1,6 @@
 SHELL := /usr/bin/env bash
 VENV ?= ./.aws-lambda-sensu-handlers-env
-DOCKER_OK := $(shell type -P docker)
+POETRY_OK := $(shell type -P poetry)
 OPENSSL_OK := $(shell type -P openssl)
 PYTHON_OK := $(shell type -P python)
 PYTHON_VERSION := $(shell python -V | cut -d' ' -f2)
@@ -21,6 +21,14 @@ check_docker:
 	    $(error package 'docker' not found!)
     else
 	    @echo Found docker!
+    endif
+
+check_poetry: check_python
+	@echo '********** Checking for poetry installation *********'
+    ifeq ('$(POETRY_OK)','')
+	    $(error package 'poetry' not found!)
+    else
+	    @echo Found poetry!
     endif
 
 check_openssl:
@@ -45,36 +53,38 @@ check_python:
 	    @echo Found Python ${PYTHON_REQUIRED}
     endif
 
-setup: check_python
+reset: ## Teardown tooling
+	rm $(poetry env info --path) -r
+.PHONY: reset
+
+run: ## Run sensu_handlers
+	poetry run python sensu_handlers/sensu_handlers.py
+
+setup: check_poetry
 	@echo '**************** Creating virtualenv *******************'
-	python -m venv $(VENV)
-	${VENV}/bin/pip install --upgrade pip
-	${VENV}/bin/pip install -r requirements/requirements-local.txt
-	${VENV}/bin/pip install mypy
+	export POETRY_VIRTUALENVS_IN_PROJECT=true && poetry run pip install --upgrade pip
+	poetry install --no-root
 	@echo '*************** Installation Complete ******************'
 
 setup_git_hooks:
 	@echo '****** Setting up git hooks ******'
-	${VENV}/bin/pre-commit install
+	poetry run pre-commit install
 
 install: setup setup_git_hooks
 
 typechecking: check_python
-	${VENV}/bin/mypy ./sensu_handlers
+	poetry run mypy ./sensu_handlers
 
-black: check_python
-	${VENV}/bin/black ./sensu_handlers
+black: check_poetry
+	poetry run black ./sensu_handlers
 
 security_checks:
-	${VENV}/bin/safety check
-	${VENV}/bin/bandit -r ./sensu_handlers --skip B303 --exclude ./sensu_handlers/test_sensu_handlers.py
+	poetry run safety check
+	poetry run bandit -r ./sensu_handlers --skip B303 --exclude ./sensu_handlers/tests/test_sensu_handlers.py
 
-test: check_python typechecking
+test: check_poetry typechecking security_checks
 	find . -type f -name '*.pyc' -delete
-	${VENV}/bin/pytest ./sensu_handlers
-
-clean:
-	rm -rf ${VENV}
+	export PYTHONPATH="${PYTHONPATH}:`pwd`/sensu_handlers" && poetry run pytest ./sensu_handlers/tests
 
 package: check_openssl
 	cd sensu_handlers && zip ../${LAMBDA_NAME}.${LAMBDA_VERSION}.zip ./sensu_handlers.py
