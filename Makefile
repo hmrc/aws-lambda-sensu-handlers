@@ -8,12 +8,6 @@ PYTHON_REQUIRED := $(shell cat .python-version)
 BUCKET_NAME := mdtp-lambda-functions
 LAMBDA_NAME := aws-lambda-sensu-handlers
 ENVIRONMENTS := integration development qa staging management externaltest production
-LAMBDA_VERSION := $(shell test -e .release-version && cat .release-version)
-LATEST_TAG := $(shell git tag --sort=v:refname \
-	| grep -E "^v[0-9]+\.[0-9]+\.[0-9]+" | tail -1 )
-TAG_MAJOR_NUMBER := $(shell echo $(LATEST_TAG) | cut -f 1 -d '.' )
-TAG_RELEASE_NUMBER := $(shell echo $(LATEST_TAG) | cut -f 2 -d '.' )
-TAG_PATCH_NUMBER := $(shell echo $(LATEST_TAG) | cut -f 3 -d '.' )
 
 check_docker:
 	@echo '********** Checking for docker installation *********'
@@ -58,7 +52,7 @@ reset: ## Teardown tooling
 .PHONY: reset
 
 run: ## Run sensu_handlers
-	poetry run python sensu_handlers/sensu_handlers.py
+	poetry run python sensu_handlers/function.py
 
 setup: check_poetry
 	@echo '**************** Creating virtualenv *******************'
@@ -71,6 +65,12 @@ setup_git_hooks:
 	poetry run pre-commit install
 
 install: setup setup_git_hooks
+
+bumpversion:
+	poetry run prepare-release
+
+cut_release:
+	poetry run cut-release
 
 typechecking: check_python
 	poetry run mypy ./sensu_handlers
@@ -96,28 +96,37 @@ package: check_openssl
 
 publish:
 	for env in ${ENVIRONMENTS}; do \
-		aws s3 cp ${LAMBDA_NAME}.${LAMBDA_VERSION}.zip s3://${BUCKET_NAME}-$${env}/${LAMBDA_NAME}/${LAMBDA_NAME}.${LAMBDA_VERSION}.zip --acl=bucket-owner-full-control ;\
-		aws s3 cp ${LAMBDA_NAME}.${LAMBDA_VERSION}.zip.base64sha256 s3://${BUCKET_NAME}-$${env}/${LAMBDA_NAME}/${LAMBDA_NAME}.${LAMBDA_VERSION}.zip.base64sha256 --content-type text/plain --acl=bucket-owner-full-control ;\
+		aws s3 cp ${LAMBDA_NAME}.$$(cat .version).zip s3://${BUCKET_NAME}-$${env}/${LAMBDA_NAME}/${LAMBDA_NAME}.$$(cat .version).zip --acl=bucket-owner-full-control ;\
+		aws s3 cp ${LAMBDA_NAME}.$$(cat .version).zip.base64sha256 s3://${BUCKET_NAME}-$${env}/${LAMBDA_NAME}/${LAMBDA_NAME}.$$(cat .version).zip.base64sha256 --content-type text/plain --acl=bucket-owner-full-control ;\
 	done
 
 ci_docker_build: check_docker
-	docker build -t python-build-env -f Dockerfile.jenkins .
+	docker build -t sensu-handlers-build-env -f Dockerfile.jenkins .
 
 ci_setup: check_docker
-	docker run --user `id -u`:`id -g` -v `pwd`:/src --workdir /src python-build-env make clean setup
+	docker run --user `id -u`:`id -g` -v `pwd`:/src --workdir /src sensu-handlers-build-env make clean setup
 
 ci_test: check_docker
-	docker run --user `id -u`:`id -g` -v `pwd`:/src --workdir /src python-build-env make test
+	docker run --user `id -u`:`id -g` -v `pwd`:/src --workdir /src sensu-handlers-build-env make test
 
 ci_security_checks:
-	docker run --user `id -u`:`id -g` -v `pwd`:/src --workdir /src python-build-env make security_checks
+	docker run --user `id -u`:`id -g` -v `pwd`:/src --workdir /src sensu-handlers-build-env make security_checks
 
 ci_package: check_docker
-	docker run --user `id -u`:`id -g` -v `pwd`:/src --workdir /src python-build-env make package
+	docker run --user `id -u`:`id -g` -v `pwd`:/src --workdir /src sensu-handlers-build-env make package
 
 ci_publish: publish
 
-ci_bumpversion:
-	echo "$(TAG_MAJOR_NUMBER).$(TAG_RELEASE_NUMBER).$$(( $(TAG_PATCH_NUMBER) + 1))" > .release-version
+ci_bumpversion: check_docker
+	export GIT_BRANCH=$(shell cat .git/_branch) && \
+    export GITHUB_API_USER="${GIT_USERNAME}" && \
+    export GITHUB_API_TOKEN="${GIT_PERSONAL_ACCESS_TOKEN}" && \
+    docker run \
+            -v `pwd`:/src \
+            --workdir /src \
+            -e GITHUB_API_USER \
+            -e GITHUB_API_TOKEN \
+            -e GIT_BRANCH \
+            sensu-handlers-build-env make bumpversion
 
 ci: ci_docker_build ci_setup ci_test ci_security_checks ci_bumpversion ci_package ci_publish

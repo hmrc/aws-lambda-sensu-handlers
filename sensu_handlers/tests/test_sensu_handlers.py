@@ -284,9 +284,8 @@ def test_save_handler_keys(mocker):
     "api_key": "abc1234567890ghi"
   }
 }"""
-    m = mock.mock_open()
-    with mock.patch("sensu_handlers.function.open", m, create=True):
-        save_handler_keys(keys)
-    m.assert_called_once_with("output/handler_keys.json", "w+")
-    handle = m()
-    handle.write.assert_called_once_with(sorted_keys)
+    mock_put_secret = mocker.patch("credstash.putSecret")
+    save_handler_keys(keys)
+    mock_put_secret.assert_called_once_with(
+        "handler_keys", sorted_keys, context={"role": "sensu"}
+    )

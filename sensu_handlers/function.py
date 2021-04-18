@@ -1,10 +1,10 @@
 import argparse
 import aws_lambda_logging
 import boto3
+import credstash
 import collections
 import os
 import pathlib
-import logging
 import requests
 import json
 
@@ -12,9 +12,11 @@ from aws_typings import LambdaContext
 from aws_typings import LambdaDict
 from typing import List, Dict, Any
 
+from aws_lambda_powertools import Logger
 from botocore.config import Config
+from credstash import putSecret
 
-log = logging.getLogger(__name__)
+logger = Logger(__name__)
 
 config = Config(retries={"max_attempts": 30, "mode": "standard"})
 
@@ -49,11 +51,11 @@ def get_all_pd_services_integrations(
     )
     if response.status_code != 200:
         if response.status_code == 401:
-            log.error(
+            logger.error(
                 "Received 401 Unauthorised from pagerduty API. Check your pagerduty API token"
             )
         else:
-            log.error(
+            logger.error(
                 f"Unexpected response from pagerduty API with status code {response.status_code}"
             )
         raise SystemExit(1)
@@ -81,19 +83,21 @@ def get_pd_integration_keys(
             response = pagerduty_session.get(integration["self"])
             if response.status_code != 200:
                 if response.status_code == 401:
-                    log.error(
+                    logger.error(
                         "Received 401 Unauthorised from pagerduty API. Check your pagerduty API token"
                     )
                 else:
-                    log.error(
+                    logger.error(
                         f"Unexpected response from pagerduty API with status code {response.status_code}"
                     )
                 raise SystemExit(1)
             ig = response.json()["integration"]
+
             if ig["type"] not in [
                 "event_transformer_api_inbound_integration",
-                "pingdom_inbound_integration",
+                "events_api_v2_inbound_integration",
                 "generic_email_inbound_integration",
+                "pingdom_inbound_integration",
             ]:
                 if ":" in ig["summary"]:
                     summary = ig["summary"].split(":")
@@ -109,9 +113,11 @@ def get_pd_integration_keys(
 
 
 def save_handler_keys(handler_keys):
-    pathlib.Path("./output").mkdir(parents=True, exist_ok=True)
-    with open("output/handler_keys.json", "w+") as handler_file:
-        handler_file.write(json.dumps(handler_keys, indent=2, sort_keys=True))
+    credstash.putSecret(
+        "handler_keys",
+        json.dumps(handler_keys, indent=2, sort_keys=True),
+        context={"role": "sensu"},
+    )
 
 
 def get_pagerduty_api_token():
@@ -123,7 +129,7 @@ def get_pagerduty_api_token():
 
 
 def lambda_handler(event: LambdaDict, context: LambdaContext) -> None:
-    aws_logger_config("Cancel Deployment", event, context)
+    aws_logger_config("Sensu Handlers", event, context)
 
     environment = os.environ.get("ENVIRONMENT", "production")
     global pagerduty_api_token
@@ -137,6 +143,6 @@ def lambda_handler(event: LambdaDict, context: LambdaContext) -> None:
 
 # if __name__ == "__main__":
 #     services = get_all_pd_services_integrations()
-#     handler_keys = get_pd_integration_keys(services, "production")
+#     handler_keys = get_pd_integration_keys(services, "integration")
 #
 #     save_handler_keys(handler_keys)
