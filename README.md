@@ -1,3 +1,4 @@
+ARCHIVED - No longer needed (see [here](https://github.com/hmrc/aws-ami-sensu-base/blob/master/files/sensu/sensu-update-handlers.sh))
 
 # aws-lambda-sensu-handlers
 
